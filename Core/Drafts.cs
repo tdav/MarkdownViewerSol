@@ -2,11 +2,15 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Leaflet.Core;
 
 /// <summary>Черновик несохранённой правки. <see cref="BaseHash"/> — от текста файла, на котором он основан.</summary>
 public sealed record Draft(string File, string Path, string Vault, DateTime Time, string Text, string BaseHash, int Pid, long Started);
+
+[JsonSerializable(typeof(Draft))]
+internal sealed partial class DraftJsonContext : JsonSerializerContext;
 
 /// <summary>
 /// Черновики несохранённых правок в <c>%APPDATA%\Leaflet\drafts</c> (файл на заметку). Пишутся в фоне по очереди;
@@ -16,7 +20,10 @@ public sealed class Drafts(string dir)
 {
     static readonly UTF8Encoding Utf8 = new(false);
     // Кириллица как есть: черновик можно прочитать и в блокноте.
-    static readonly JsonSerializerOptions Json = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+    static readonly DraftJsonContext Json = new(new JsonSerializerOptions
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    });
     static readonly int Pid = Environment.ProcessId;
     static readonly long Started = Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks;
     public string Dir { get; } = dir;
@@ -50,7 +57,7 @@ public sealed class Drafts(string dir)
             Directory.CreateDirectory(Dir);
             string file = FileFor(path), tmp = file + ".tmp";
             var draft = new Draft(file, path, vault, time, text, Hash(baseText), Pid, Started);
-            System.IO.File.WriteAllText(tmp, JsonSerializer.Serialize(draft, Json), Utf8);
+            System.IO.File.WriteAllText(tmp, JsonSerializer.Serialize(draft, Json.Draft), Utf8);
             System.IO.File.Move(tmp, file, overwrite: true);
         });
     }
@@ -75,7 +82,7 @@ public sealed class Drafts(string dir)
         foreach (var f in Directory.EnumerateFiles(Dir, "*.json"))
         {
             Draft? d;
-            try { d = JsonSerializer.Deserialize<Draft>(System.IO.File.ReadAllText(f)); }
+            try { d = JsonSerializer.Deserialize(System.IO.File.ReadAllText(f), Json.Draft); }
             catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { continue; }
             if (d == null || !d.Vault.Equals(vault, StringComparison.OrdinalIgnoreCase) || Alive(d)) continue;
             list.Add(d with { File = f });

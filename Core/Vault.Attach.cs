@@ -13,7 +13,10 @@ public sealed partial class Vault
     public static bool IsImage(string path) => ImageExtensions.Contains(System.IO.Path.GetExtension(path).ToLowerInvariant());
 
     /// <summary>Любая ссылка Markdown с путём: ![](…) и [текст](…), путь в группе src (в &lt;…&gt; — с пробелами).</summary>
-    static readonly Regex PathLink = new(@"(?<img>!)?\[(?<alt>[^\[\]\n]*)\]\((?:<(?<src>[^<>\n]+)>|(?<src>[^()\s]+))\)", RegexOptions.Compiled);
+    static readonly Regex PathLink = PathLinkRegex();
+
+    [GeneratedRegex(@"(?<img>!)?\[(?<alt>[^\[\]\n]*)\]\((?:<(?<src>[^<>\n]+)>|(?<src>[^()\s]+))\)")]
+    private static partial Regex PathLinkRegex();
 
     Dictionary<string, List<string>>? _files; // имя файла (нижний регистр) → полные пути; кроме .md
 

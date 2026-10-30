@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -27,7 +28,7 @@ sealed class Row
 }
 
 /// <summary>Левая панель: имя хранилища, поиск по заметкам и дерево папок (или результаты поиска).</summary>
-sealed class Sidebar : Border
+sealed partial class Sidebar : Border
 {
     readonly TextBlock _title;
     readonly TextBox _search;
@@ -53,7 +54,9 @@ sealed class Sidebar : Border
     public void ActivateRow(Row row) => Activate(row, false);
     /// <summary>Строка поиска — запрос по тегу: «#» и буквы, цифры, «_», «/», «-».</summary>
     public static bool IsTagQuery(string query) => TagQuery.IsMatch(query);
-    static readonly System.Text.RegularExpressions.Regex TagQuery = new(@"^#[\p{L}\p{N}_/-]*$", System.Text.RegularExpressions.RegexOptions.Compiled);
+    static readonly Regex TagQuery = TagQueryRegex();
+    [GeneratedRegex(@"^#[\p{L}\p{N}_/-]*$")]
+    private static partial Regex TagQueryRegex();
 
     readonly Border _addButton, _folderButton, _searchKeys;
 
@@ -86,6 +89,13 @@ sealed class Sidebar : Border
         head.Children.Add(folder);
         head.Children.Add(_title);
 
+        _list = new ListBox
+        {
+            Background = Brushes.Transparent,
+            ItemTemplate = new Avalonia.Controls.Templates.FuncDataTemplate<Row>((_, _) => new RowView(), supportsRecycling: true),
+        };
+        ScrollViewer.SetHorizontalScrollBarVisibility(_list, ScrollBarVisibility.Disabled);
+
         _search = new TextBox
         {
             PlaceholderText = Loc.T("sb.search"),
@@ -108,12 +118,6 @@ sealed class Sidebar : Border
             else if (e.Key == Key.Enter) { _searchDelay.Stop(); Rebuild(); Activate(_list.Items.OfType<Row>().FirstOrDefault(r => r.Kind is RowKind.Note or RowKind.Hit or RowKind.Tag), false); e.Handled = true; }
         };
 
-        _list = new ListBox
-        {
-            Background = Brushes.Transparent,
-            ItemTemplate = new Avalonia.Controls.Templates.FuncDataTemplate<Row>((_, _) => new RowView(), supportsRecycling: true),
-        };
-        ScrollViewer.SetHorizontalScrollBarVisibility(_list, ScrollBarVisibility.Disabled);
         _list.AddHandler(PointerReleasedEvent, (_, e) =>
         {
             if (e.InitialPressMouseButton is not (MouseButton.Left or MouseButton.Middle)) return;

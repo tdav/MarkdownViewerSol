@@ -47,33 +47,69 @@ public sealed record ExportStyle(
 /// Экспорт заметки: Markdown разбирается в блоки (<see cref="Parse"/>), из них собирается HTML-страница (<see cref="Html"/>)
 /// или PDF (<see cref="PdfExport"/>). [[Ссылки]] становятся обычными ссылками на соседние файлы экспорта.
 /// </summary>
-public static class Export
+public static partial class Export
 {
-    static readonly Regex Fence = new(@"^ {0,3}```\s*([^`\s]*)", RegexOptions.Compiled);
-    static readonly Regex Quote = new(@"^ {0,3}>[ \t]?", RegexOptions.Compiled);
-    static readonly Regex Item = new(@"^([ \t]*)([-*+]|\d{1,9}[.)])[ \t]+(?:\[([ xX])\][ \t]+)?", RegexOptions.Compiled);
-    static readonly Regex Rule = new(@"^ {0,3}([-*_])( *\1){2,} *$", RegexOptions.Compiled);
+    static readonly Regex Fence = FenceRegex();
+    static readonly Regex Quote = QuoteRegex();
+    static readonly Regex Item = ItemRegex();
+    static readonly Regex Rule = RuleRegex();
     const int MaxEmbedDepth = 4;
 
     // Порядок важен: при совпадении в одной позиции побеждает первое (как в живом просмотре: код и ссылки раньше выделения).
     static readonly Regex[] Inline =
     [
-        new(@"(`+)(?!`)(.+?)(?<!`)\1(?!`)", RegexOptions.Compiled),
+        Markdown.CodeSpan,
         Markdown.Embed,
         Markdown.WikiLink,
         Markdown.Link,
-        new(@"https?://[^\s<>()\[\]]*[^\s<>()\[\].,;:!?'""»]", RegexOptions.Compiled),
-        new(@"(\*\*\*|___)(?=\S)(.+?)(?<=\S)\1", RegexOptions.Compiled),
-        new(@"(\*\*|__)(?=\S)(.+?)(?<=\S)\1", RegexOptions.Compiled),
-        new(@"(?<![*\w\\])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?![*\w])", RegexOptions.Compiled),
-        new(@"(?<![_\w])_(?=[^\s_])(.+?)(?<=[^\s_])_(?![_\w])", RegexOptions.Compiled),
-        new(@"~~(?=\S)(.+?)(?<=\S)~~", RegexOptions.Compiled),
-        new(@"==(?=\S)(.+?)(?<=\S)==", RegexOptions.Compiled),
+        AutoUrlRegex(),
+        BoldItalicRegex(),
+        BoldRegex(),
+        ItalicStarRegex(),
+        ItalicUnderscoreRegex(),
+        StrikeRegex(),
+        MarkRegex(),
         Markdown.Tag,
         Markdown.FootnoteRef,
     ];
-    static readonly Regex ImageLine = new(@"^\s*(?:(?:" + Markdown.Embed + @")\s*)+$", RegexOptions.Compiled);
+    static readonly Regex ImageLine = ImageLineRegex();
     static readonly RunStyle[] Wraps = [RunStyle.Bold | RunStyle.Italic, RunStyle.Bold, RunStyle.Italic, RunStyle.Italic, RunStyle.Strike, RunStyle.Mark];
+
+    [GeneratedRegex(@"^ {0,3}```\s*([^`\s]*)")]
+    private static partial Regex FenceRegex();
+
+    [GeneratedRegex(@"^ {0,3}>[ \t]?")]
+    private static partial Regex QuoteRegex();
+
+    [GeneratedRegex(@"^([ \t]*)([-*+]|\d{1,9}[.)])[ \t]+(?:\[([ xX])\][ \t]+)?")]
+    private static partial Regex ItemRegex();
+
+    [GeneratedRegex(@"^ {0,3}([-*_])( *\1){2,} *$")]
+    private static partial Regex RuleRegex();
+
+    [GeneratedRegex(@"https?://[^\s<>()\[\]]*[^\s<>()\[\].,;:!?'""»]")]
+    private static partial Regex AutoUrlRegex();
+
+    [GeneratedRegex(@"(\*\*\*|___)(?=\S)(.+?)(?<=\S)\1")]
+    private static partial Regex BoldItalicRegex();
+
+    [GeneratedRegex(@"(\*\*|__)(?=\S)(.+?)(?<=\S)\1")]
+    private static partial Regex BoldRegex();
+
+    [GeneratedRegex(@"(?<![*\w\\])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?![*\w])")]
+    private static partial Regex ItalicStarRegex();
+
+    [GeneratedRegex(@"(?<![_\w])_(?=[^\s_])(.+?)(?<=[^\s_])_(?![_\w])")]
+    private static partial Regex ItalicUnderscoreRegex();
+
+    [GeneratedRegex(@"~~(?=\S)(.+?)(?<=\S)~~")]
+    private static partial Regex StrikeRegex();
+
+    [GeneratedRegex(@"==(?=\S)(.+?)(?<=\S)==")]
+    private static partial Regex MarkRegex();
+
+    [GeneratedRegex(@"^\s*(?:(?:" + Markdown.EmbedPattern + @")\s*)+$")]
+    private static partial Regex ImageLineRegex();
 
     // ---------- разбор ----------
 
@@ -533,7 +569,7 @@ public static class Export
         }
     }
 
-    /// <summary>Картинка рядом с заметкой встраивается (data:), чтобы страница не зависела от папки хранилища.</summary>
+    /// <summary>Картинки рядом с заметкой встраиваются (data:), чтобы страница не зависела от папки хранилища.</summary>
     static string ImageSrc(string src, string? baseDir, string? pageDir)
     {
         // У встроенной заметки ![](путь) — от её папки, ![[файл]] — уже от папки страницы.

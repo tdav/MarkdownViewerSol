@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using Avalonia;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -16,24 +16,51 @@ namespace Leaflet.Editor;
 /// Скрытие — шрифт почти нулевого размера и прозрачный цвет: текст остаётся в документе,
 /// поэтому выделение, копирование и отмена работают с исходным Markdown.
 /// </summary>
-public sealed class LivePreview : DocumentColorizingTransformer
+public sealed partial class LivePreview : DocumentColorizingTransformer
 {
     const double HiddenSize = 0.01;
 
     static readonly Regex Heading = Markdown.Heading;
-    static readonly Regex Quote = new(@"^[ \t]{0,3}>[ \t]?", RegexOptions.Compiled);
-    static readonly Regex TaskItem = new(@"^[ \t]*([-*+] \[[ xX]\])", RegexOptions.Compiled);
-    static readonly Regex Rule =new(@"^ {0,3}([-*_])( *\1){2,} *$", RegexOptions.Compiled);
-    static readonly Regex CodeSpan = new(@"(`+)(?!`)(.+?)(?<!`)\1(?!`)", RegexOptions.Compiled);
+    static readonly Regex Quote = QuoteRegex();
+    static readonly Regex TaskItem = TaskItemRegex();
+    static readonly Regex Rule = RuleRegex();
+    static readonly Regex CodeSpan = Markdown.CodeSpan;
     static readonly Regex WikiLink = Markdown.WikiLink;
     static readonly Regex Link = Markdown.Link;
-    static readonly Regex BoldItalic = new(@"(\*\*\*|___)(?=\S)(.+?)(?<=\S)\1", RegexOptions.Compiled);
-    static readonly Regex Bold = new(@"(\*\*|__)(?=\S)(.+?)(?<=\S)\1", RegexOptions.Compiled);
-    static readonly Regex ItalicStar = new(@"(?<![*\w\\])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?![*\w])", RegexOptions.Compiled);
-    static readonly Regex ItalicUnderscore = new(@"(?<![_\w])_(?=[^\s_])(.+?)(?<=[^\s_])_(?![_\w])", RegexOptions.Compiled);
-    static readonly Regex Strike = new(@"~~(?=\S)(.+?)(?<=\S)~~", RegexOptions.Compiled);
-    static readonly Regex Mark = new(@"==(?=\S)(.+?)(?<=\S)==", RegexOptions.Compiled);
+    static readonly Regex BoldItalic = BoldItalicRegex();
+    static readonly Regex Bold = BoldRegex();
+    static readonly Regex ItalicStar = ItalicStarRegex();
+    static readonly Regex ItalicUnderscore = ItalicUnderscoreRegex();
+    static readonly Regex Strike = StrikeRegex();
+    static readonly Regex Mark = MarkRegex();
     static readonly Regex Tag = Markdown.Tag;
+
+    [GeneratedRegex(@"^[ \t]{0,3}>[ \t]?")]
+    private static partial Regex QuoteRegex();
+
+    [GeneratedRegex(@"^[ \t]*([-*+] \[[ xX]\])")]
+    private static partial Regex TaskItemRegex();
+
+    [GeneratedRegex(@"^ {0,3}([-*_])( *\1){2,} *$")]
+    private static partial Regex RuleRegex();
+
+    [GeneratedRegex(@"(\*\*\*|___)(?=\S)(.+?)(?<=\S)\1")]
+    private static partial Regex BoldItalicRegex();
+
+    [GeneratedRegex(@"(\*\*|__)(?=\S)(.+?)(?<=\S)\1")]
+    private static partial Regex BoldRegex();
+
+    [GeneratedRegex(@"(?<![*\w\\])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?![*\w])")]
+    private static partial Regex ItalicStarRegex();
+
+    [GeneratedRegex(@"(?<![_\w])_(?=[^\s_])(.+?)(?<=[^\s_])_(?![_\w])")]
+    private static partial Regex ItalicUnderscoreRegex();
+
+    [GeneratedRegex(@"~~(?=\S)(.+?)(?<=\S)~~")]
+    private static partial Regex StrikeRegex();
+
+    [GeneratedRegex(@"==(?=\S)(.+?)(?<=\S)==")]
+    private static partial Regex MarkRegex();
 
     readonly TextEditor _editor;
     readonly TextView _view;
@@ -435,4 +462,3 @@ sealed class CodeBlockBackground(LivePreview owner) : IBackgroundRenderer
         }
     }
 }
-

@@ -1,6 +1,8 @@
+using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Platform;
+using Avalonia.Rendering.Composition;
 using Avalonia.Threading;
 using Leaflet.Core;
 using Leaflet.UI;
@@ -16,8 +18,114 @@ public sealed partial class MainWindow
     PixelPoint _normalPos;
     double _normalW, _normalH, _normalScale = 1;
     bool _lastMax;
+    nint _bgBrush;
 
-    static WindowIcon AppIcon() => new(AssetLoader.Open(new Uri("avares://Leaflet/Assets/leaflet.png")));
+    [StructLayout(LayoutKind.Sequential)]
+    struct RECT { public int Left, Top, Right, Bottom; }
+
+    [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(nint hwnd, int attr, ref int value, int size);
+    [DllImport("gdi32.dll")] static extern nint CreateSolidBrush(uint colorref);
+    [DllImport("gdi32.dll")] static extern bool DeleteObject(nint hObject);
+    [DllImport("user32.dll")] static extern nint SetClassLongPtrW(nint hWnd, int nIndex, nint dwNewLong);
+    [DllImport("user32.dll")] static extern bool GetClientRect(nint hWnd, out RECT lpRect);
+    [DllImport("user32.dll")] static extern int FillRect(nint hDC, ref RECT lprc, nint hbr);
+    [DllImport("user32.dll")] static extern nint GetDC(nint hWnd);
+    [DllImport("user32.dll")] static extern int ReleaseDC(nint hWnd, nint hDC);
+
+    const int GCLP_HBRBACKGROUND = -10;
+    const int DWMWA_CLOAK = 13;
+    const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+    const int DWMWA_BORDER_COLOR = 34;
+    const int DWMWA_CAPTION_COLOR = 35;
+    const uint WM_ERASEBKGND = 0x0014;
+
+    /// <summary>
+    /// Убирает белое мигание Win32-окна при запуске: задаёт кисть фона класса окна в цвет темы,
+    /// перехватывает WM_ERASEBKGND и временно скрывает окно через DWM Cloak до отрисовки первого кадра Avalonia.
+    /// </summary>
+    void InitNativeBackdrop()
+    {
+        if (TryGetPlatformHandle()?.Handle is not { } hwnd || hwnd == 0) return;
+
+        UpdateNativeBackdrop();
+        Win32Properties.AddWndProcHookCallback(this, OnWndProc);
+
+        int cloak = 1;
+        _ = DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, ref cloak, sizeof(int));
+
+        Opened += async (_, _) =>
+        {
+            try
+            {
+                if (ElementComposition.GetElementVisual(this)?.Compositor is { } comp)
+                {
+                    var batch = comp.RequestCompositionBatchCommitAsync();
+                    await Task.WhenAny(batch.Rendered, Task.Delay(200));
+                }
+            }
+            catch { }
+
+            int uncloak = 0;
+            _ = DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, ref uncloak, sizeof(int));
+            Activate();
+            if (_tab != null) Editor.Focus();
+        };
+
+        Closed += (_, _) =>
+        {
+            if (_bgBrush != 0)
+            {
+                DeleteObject(_bgBrush);
+                _bgBrush = 0;
+            }
+        };
+    }
+
+    /// <summary>Обновляет системный фон Win32-окна и атрибуты DWM при запуске и смене темы.</summary>
+    void UpdateNativeBackdrop()
+    {
+        if (TryGetPlatformHandle()?.Handle is not { } hwnd || hwnd == 0) return;
+
+        var c = Skin.Bg.Color;
+        int colorref = c.R | (c.G << 8) | (c.B << 16);
+        int dark = Skin.IsLight ? 0 : 1;
+        _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref dark, sizeof(int));
+        _ = DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, ref colorref, sizeof(int));
+
+        var lc = Skin.Line.Color;
+        int borderColorref = lc.R | (lc.G << 8) | (lc.B << 16);
+        _ = DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, ref borderColorref, sizeof(int));
+
+        nint newBrush = CreateSolidBrush((uint)colorref);
+        nint oldBrush = _bgBrush;
+        _bgBrush = newBrush;
+        if (newBrush != 0)
+        {
+            SetClassLongPtrW(hwnd, GCLP_HBRBACKGROUND, newBrush);
+            nint hdc = GetDC(hwnd);
+            if (hdc != 0)
+            {
+                if (GetClientRect(hwnd, out var rc))
+                    FillRect(hdc, ref rc, newBrush);
+                ReleaseDC(hwnd, hdc);
+            }
+        }
+        if (oldBrush != 0) DeleteObject(oldBrush);
+    }
+
+    nint OnWndProc(nint hWnd, uint msg, nint wParam, nint lParam, ref bool handled)
+    {
+        if (msg == WM_ERASEBKGND && _bgBrush != 0 && wParam != 0)
+        {
+            if (GetClientRect(hWnd, out var rc))
+                FillRect(wParam, ref rc, _bgBrush);
+            handled = true;
+            return 1;
+        }
+        return 0;
+    }
+
+    static WindowIcon AppIcon() => new(AssetLoader.Open(new Uri($"avares://{typeof(MainWindow).Assembly.GetName().Name}/Assets/leaflet.png")));
 
     int? SavedInt(string key) => int.TryParse(_settings[key], out var v) ? v : null;
     double? SavedScale() => _settings.Number("scale", 0) is var v and > 0 ? v : null;

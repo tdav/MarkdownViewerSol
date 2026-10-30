@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -13,11 +14,18 @@ namespace Leaflet;
 /// <summary>Приложение без XAML: тема и стили редактора подключаются кодом.</summary>
 public sealed class App : Application
 {
+    [DynamicDependency(DynamicallyAccessedMemberTypes.All, "CompiledAvaloniaXaml.!XamlLoader", "AvaloniaEdit")]
+    [DynamicDependency(DynamicallyAccessedMemberTypes.All, "CompiledAvaloniaXaml.!AvaloniaResources", "AvaloniaEdit")]
+    [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "AvaloniaEdit compiled XAML resources are preserved via DynamicDependency.")]
     public override void Initialize()
     {
+        // Явно загружаем сборку AvaloniaEdit до обращения к её ресурсам avares://AvaloniaEdit/...
+        // При отключённом DynamicCodeSupport (PublishAot) Avalonia ищет сборку только среди уже загруженных в AppDomain.
+        GC.KeepAlive(typeof(AvaloniaEdit.TextEditor).Assembly);
+
         RequestedThemeVariant = ThemeVariant.Dark;
         Styles.Add(new FluentTheme());
-        Styles.Add(new StyleInclude(new Uri("avares://Leaflet"))
+        Styles.Add(new StyleInclude(new Uri($"avares://{typeof(App).Assembly.GetName().Name}/"))
         {
             Source = new Uri("avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml"),
         });

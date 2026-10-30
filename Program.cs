@@ -1,7 +1,10 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using Avalonia;
 using Leaflet.Core;
+
+[assembly: SupportedOSPlatform("windows")]
 
 namespace Leaflet;
 

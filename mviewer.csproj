@@ -1,20 +1,19 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net11.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>Leaflet</AssemblyName>
+    <AssemblyName>mviewer</AssemblyName>
     <RootNamespace>Leaflet</RootNamespace>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PublishAot>true</PublishAot>
     <ApplicationIcon>Assets\leaflet.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Version>1.0.0</Version>
-    <AssemblyTitle>Leaflet</AssemblyTitle>
-    <Product>Leaflet</Product>
-    <Description>Лёгкий заметочник: папка с Markdown-файлами, [[ссылки]], обратные ссылки, поиск</Description>
-    <Copyright>© 2026 olegche</Copyright>
+    <AssemblyTitle>mviewer</AssemblyTitle>
+    <Product>mviewer</Product>
     <NeutralLanguage>ru</NeutralLanguage>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
@@ -27,4 +26,41 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />
     <PackageReference Include="Avalonia.AvaloniaEdit" Version="12.0.0" />
   </ItemGroup>
+
+  <!-- В .NET 11 SDK при публикации PrepareResourceNames/SplitResourcesByCulture вызывается раньше AddAvaloniaResources,
+       из-за чего без XAML-файлов ресурс !AvaloniaResources (avares://Leaflet/...) не попадает в сборку. -->
+  <Target Name="EnsureAvaloniaResourcesBeforePrepareResourceNames"
+          BeforeTargets="PrepareResourceNames;SplitResourcesByCulture"
+          DependsOnTargets="AddAvaloniaResources;GenerateAvaloniaResources" />
+
+  <Target Name="ConfigureMsvcFallbackForAot"
+          BeforeTargets="SetupOSSpecificProps"
+          Condition="'$(PublishAot)' == 'true' and '$(_targetOS)' == 'win' and '$(IlcUseEnvironmentalTools)' != 'true'">
+    <PropertyGroup>
+      <_VsWherePath>$([System.Environment]::GetEnvironmentVariable('ProgramFiles(x86)'))\Microsoft Visual Studio\Installer\vswhere.exe</_VsWherePath>
+    </PropertyGroup>
+    <Exec Condition="Exists('$(_VsWherePath)')"
+          Command="&quot;$(_VsWherePath)&quot; -latest -prerelease -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath"
+          IgnoreExitCode="true" ConsoleToMSBuild="true" StandardOutputImportance="Low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_VsVcToolsInstallPath" />
+    </Exec>
+    <ItemGroup Condition="'$(_VsVcToolsInstallPath)' == ''">
+      <_FallbackMsvcLinker Include="$(ProgramFiles)\Microsoft Visual Studio\*\*\VC\Tools\MSVC\*\bin\Hostx64\$(_targetArchitecture)\link.exe" />
+      <_FallbackMsvcLib Include="$(ProgramFiles)\Microsoft Visual Studio\*\*\VC\Tools\MSVC\*\lib\onecore\$(_targetArchitecture)\libcmt.lib" />
+      <_FallbackWinSdkUcrtLib Include="$(MSBuildProgramFiles32)\Windows Kits\10\Lib\*\ucrt\$(_targetArchitecture)\ucrt.lib" />
+      <_FallbackWinSdkUmLib Include="$(MSBuildProgramFiles32)\Windows Kits\10\Lib\*\um\$(_targetArchitecture)\kernel32.lib" />
+    </ItemGroup>
+    <PropertyGroup Condition="'$(_VsVcToolsInstallPath)' == '' and '@(_FallbackMsvcLinker)' != '' and '@(_FallbackMsvcLib)' != '' and '@(_FallbackWinSdkUcrtLib)' != '' and '@(_FallbackWinSdkUmLib)' != ''">
+      <IlcUseEnvironmentalTools>true</IlcUseEnvironmentalTools>
+      <_SelectedMsvcBinDir>$([System.IO.Path]::GetDirectoryName('%(_FallbackMsvcLinker.FullPath)'))</_SelectedMsvcBinDir>
+      <CppLinker>$(_SelectedMsvcBinDir)\link.exe</CppLinker>
+      <CppCompiler>$(_SelectedMsvcBinDir)\cl.exe</CppCompiler>
+      <CppLibCreator>$(_SelectedMsvcBinDir)\lib.exe</CppLibCreator>
+    </PropertyGroup>
+    <ItemGroup Condition="'$(IlcUseEnvironmentalTools)' == 'true' and '$(_SelectedMsvcBinDir)' != ''">
+      <AdditionalNativeLibraryDirectories Include="$([System.IO.Path]::GetDirectoryName('%(_FallbackMsvcLib.FullPath)'))" />
+      <AdditionalNativeLibraryDirectories Include="$([System.IO.Path]::GetDirectoryName('%(_FallbackWinSdkUcrtLib.FullPath)'))" />
+      <AdditionalNativeLibraryDirectories Include="$([System.IO.Path]::GetDirectoryName('%(_FallbackWinSdkUmLib.FullPath)'))" />
+    </ItemGroup>
+  </Target>
 </Project>

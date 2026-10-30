@@ -4,9 +4,12 @@ using System.Text.RegularExpressions;
 namespace Leaflet.Core;
 
 /// <summary>Таблицы Markdown (GFM): ячейки строки, выравнивание, приведение исходника к ровным столбцам.</summary>
-public static class MdTable
+public static partial class MdTable
 {
-    public static readonly Regex Separator = new(@"^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$", RegexOptions.Compiled);
+    public static readonly Regex Separator = SeparatorRegex();
+
+    [GeneratedRegex(@"^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$")]
+    private static partial Regex SeparatorRegex();
 
     /// <summary>Ячейка: [Start, End) — между чертами, [From, To) — текст без пробелов по краям (индексы в строке).</summary>
     public readonly record struct Cell(int Start, int End, int From, int To);

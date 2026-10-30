@@ -11,7 +11,7 @@ using Leaflet.Editor;
 namespace Leaflet.UI;
 
 /// <summary>Правая панель «Графита»: обратные ссылки, структура по заголовкам, теги заметки.</summary>
-sealed class RightPanel : Border
+sealed partial class RightPanel : Border
 {
     readonly StackPanel _backlinks = new(), _outline = new();
     readonly WrapPanel _tags = new();
@@ -141,7 +141,9 @@ sealed class RightPanel : Border
         _activeHeading = active;
     }
 
-    static readonly Regex InlineMarks = new(@"\*\*|__|\*|`|==|~~|\[\[|\]\]", RegexOptions.Compiled);
+    static readonly Regex InlineMarks = InlineMarksRegex();
+    [GeneratedRegex(@"\*\*|__|\*|`|==|~~|\[\[|\]\]")]
+    private static partial Regex InlineMarksRegex();
     static string Clean(string s) => InlineMarks.Replace(s, "").Trim();
 
     static TextBlock Empty(string text) => new() { Text = text, FontSize = 12, Foreground = Skin.Mute };

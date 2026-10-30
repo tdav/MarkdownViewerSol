@@ -3,22 +3,46 @@ using System.Text.RegularExpressions;
 namespace Leaflet.Core;
 
 /// <summary>Разбор Markdown, общий для редактора и индекса.</summary>
-public static class Markdown
+public static partial class Markdown
 {
-    public static readonly Regex WikiLink = new(@"\[\[([^\[\]|\n]+)(\|[^\[\]\n]+)?\]\]", RegexOptions.Compiled);
-    public static readonly Regex Link = new(@"(?<!!)\[([^\[\]\n]+)\]\(([^()\s]+)\)", RegexOptions.Compiled);
-    public static readonly Regex Tag = new(@"(?<![\w#&])#[\p{L}\p{N}_/-]*\p{L}[\p{L}\p{N}_/-]*", RegexOptions.Compiled);
-    public static readonly Regex Heading = new(@"^(#{1,6})[ \t]+", RegexOptions.Compiled);
-    public static readonly Regex CodeSpan = new(@"(`+)(?!`)(.+?)(?<!`)\1(?!`)", RegexOptions.Compiled);
+    public const string EmbedPattern = @"!\[(?<alt>[^\[\]\n]*)\]\((?:<(?<src>[^<>\n]+)>|(?<src>[^()\s]+))\)|!\[\[(?<wiki>[^\[\]|\n]+)(?:\|(?<alt>[^\[\]\n]*))?\]\]";
+
+    public static readonly Regex WikiLink = WikiLinkRegex();
+    public static readonly Regex Link = LinkRegex();
+    public static readonly Regex Tag = TagRegex();
+    public static readonly Regex Heading = HeadingRegex();
+    public static readonly Regex CodeSpan = CodeSpanRegex();
     /// <summary>Картинка: ![подпись](путь), ![подпись](&lt;путь с пробелами&gt;) — группы alt, src; ![[файл|подпись]] — группы wiki, alt.</summary>
-    public static readonly Regex Embed = new(
-        @"!\[(?<alt>[^\[\]\n]*)\]\((?:<(?<src>[^<>\n]+)>|(?<src>[^()\s]+))\)|!\[\[(?<wiki>[^\[\]|\n]+)(?:\|(?<alt>[^\[\]\n]*))?\]\]",
-        RegexOptions.Compiled);
+    public static readonly Regex Embed = EmbedRegex();
 
     /// <summary>Ссылка на сноску [^метка] (не определение «[^метка]:»).</summary>
-    public static readonly Regex FootnoteRef = new(@"\[\^([^\[\]\s]+)\](?!:)", RegexOptions.Compiled);
+    public static readonly Regex FootnoteRef = FootnoteRefRegex();
     /// <summary>Определение сноски в начале строки: «[^метка]: текст».</summary>
-    public static readonly Regex FootnoteDef = new(@"^\[\^([^\[\]\s]+)\]:[ \t]?", RegexOptions.Compiled);
+    public static readonly Regex FootnoteDef = FootnoteDefRegex();
+
+    [GeneratedRegex(@"\[\[([^\[\]|\n]+)(\|[^\[\]\n]+)?\]\]")]
+    private static partial Regex WikiLinkRegex();
+
+    [GeneratedRegex(@"(?<!!)\[([^\[\]\n]+)\]\(([^()\s]+)\)")]
+    private static partial Regex LinkRegex();
+
+    [GeneratedRegex(@"(?<![\w#&])#[\p{L}\p{N}_/-]*\p{L}[\p{L}\p{N}_/-]*")]
+    private static partial Regex TagRegex();
+
+    [GeneratedRegex(@"^(#{1,6})[ \t]+")]
+    private static partial Regex HeadingRegex();
+
+    [GeneratedRegex(@"(`+)(?!`)(.+?)(?<!`)\1(?!`)")]
+    private static partial Regex CodeSpanRegex();
+
+    [GeneratedRegex(EmbedPattern)]
+    private static partial Regex EmbedRegex();
+
+    [GeneratedRegex(@"\[\^([^\[\]\s]+)\](?!:)")]
+    private static partial Regex FootnoteRefRegex();
+
+    [GeneratedRegex(@"^\[\^([^\[\]\s]+)\]:[ \t]?")]
+    private static partial Regex FootnoteDefRegex();
 
     /// <summary>Вставка ![[…]] ведёт на заметку, а не на файл: нет расширения или .md.</summary>
     public static bool IsNoteEmbed(string target)

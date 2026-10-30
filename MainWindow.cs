@@ -1,4 +1,4 @@
-﻿using Avalonia;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
@@ -73,6 +73,10 @@ public sealed partial class MainWindow : Window
         _settings = Settings.Load(readOnly: _bench || selfTest != null || _crashTest);
         InitSafety(data ?? (selfTest != null ? Path.Combine(Path.GetFullPath(selfTest), "appdata") : _bench ? null : Settings.DefaultDir), clean: selfTest != null && data == null);
         _keys = Keymap.Current = new Keymap(_settings);
+
+        Skin.SetText(_settings.Font, _settings.FontSize);
+        Skin.Apply(Skin.FromName(_settings["theme"]));
+        InitNativeBackdrop();
 
         Title = "Leaflet";
         bool fixedSize = _settings.ReadOnly;
@@ -161,11 +165,11 @@ public sealed partial class MainWindow : Window
         //else if (_crashTest)
         //    Opened += async (_, _) => await CrashTest();
         //else
-        //    Opened += (_, _) =>
-            {
-                if (_tab != null) Editor.Focus();
-                if (data == null) DesktopShortcut.EnsureFirstRun(_settings, FileAssoc.ExePath);
-            };
+        Opened += (_, _) =>
+        {
+            if (_tab != null) Editor.Focus();
+            if (data == null) DesktopShortcut.EnsureFirstRun(_settings, FileAssoc.ExePath);
+        };
     }
 
     // ---------- хранилище ----------
@@ -691,7 +695,7 @@ public sealed partial class MainWindow : Window
                 ? new PaletteItem(Loc.T("repl.none"), null, () => { })
                 : new PaletteItem(Loc.T("repl.next", Cut(find)), "Enter", () => PromptReplaceWith(find, plan),
                     Loc.T("in.fmt", Loc.Plural(total, "pl.match"), Loc.Plural(plan.Count, "pl.note.in"))),
-            new PaletteItem(matchCase ? Loc.T("repl.case.on") : Loc.T("repl.case.off"), null, () => { _find.MatchCase = !matchCase; PromptReplaceAll(find); }),
+            new PaletteItem(matchCase ? Loc.T("repl.case.on") : new string(Loc.T("repl.case.off")), null, () => { _find.MatchCase = !matchCase; PromptReplaceAll(find); }),
         ];
     }
 
@@ -790,6 +794,7 @@ public sealed partial class MainWindow : Window
             Skin.SetText(font, size);
             Skin.Apply(kind);
             ApplyThemeLayout();
+            UpdateNativeBackdrop();
         }
         ApplyTextWidth();
         if (_vault != null) _vault.AttachFolder = _settings.AttachFolder;
