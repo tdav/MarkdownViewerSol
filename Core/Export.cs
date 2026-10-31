@@ -347,7 +347,7 @@ public static partial class Export
         if (url.Contains("://") || url.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase)) return url;
         int hash = url.IndexOf('#');
         string path = hash < 0 ? url : url[..hash], frag = hash < 0 ? "" : url[hash..];
-        return path.EndsWith(".md", StringComparison.OrdinalIgnoreCase) ? path[..^3] + ext + frag : url;
+        return FileAssoc.IsMarkdown(path) ? FileAssoc.StripExt(path) + ext + frag : url;
     }
 
     public static string PlainText(IEnumerable<Run> runs) => string.Concat(runs.Select(r => r.Style.HasFlag(RunStyle.Break) ? " " : r.Text));
@@ -383,7 +383,7 @@ public static partial class Export
         var note = hash == 0 ? from : vault?.Resolve(target, from);
         if (note == null) return null;
         if (note == page) return anchor.Length > 0 ? anchor : "#";
-        return RelativeHref(page.Folder, note.Rel[..^3] + ext, ascii) + anchor;
+        return RelativeHref(page.Folder, note.RelNoExt + ext, ascii) + anchor;
     };
 
     /// <summary>
@@ -676,7 +676,7 @@ public static partial class Export
         int n = 0;
         foreach (var note in vault.Notes.ToList())
         {
-            ToFile(vault, note, note.Text, Path.Combine(dir, note.Rel[..^3].Replace('/', Path.DirectorySeparatorChar) + ext), st);
+            ToFile(vault, note, note.Text, Path.Combine(dir, note.RelNoExt.Replace('/', Path.DirectorySeparatorChar) + ext), st);
             n++;
         }
         return n;

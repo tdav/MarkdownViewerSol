@@ -11,8 +11,19 @@ namespace Leaflet;
 public sealed partial class MainWindow
 {
     /// <summary>Файл вставки из открытой заметки (см. <see cref="Vault.ResolveFile"/>).</summary>
-    string? ResolveEmbed(string src, bool wiki) =>
-        _vault != null && _tab != null ? _vault.ResolveFile(src, _tab.Note, wiki) : null;
+    string? ResolveEmbed(string src, bool wiki)
+    {
+        if (_tab == null) return null;
+        if (_vault != null && !_tab.External) return _vault.ResolveFile(src, _tab.Note, wiki);
+        if (wiki && (!Path.HasExtension(src) || FileAssoc.IsMarkdown(src))) return null;
+        try
+        {
+            string full = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(_tab.Note.Path)!, src.TrimStart('/', '\\')));
+            return File.Exists(full) ? full : null;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or IOException) { return null; }
+    }
+
 
     /// <summary>Встроенная заметка ![[Имя#раздел]] из открытой заметки (адреса ссылок — как для экспорта в .md, нужны только для вида).</summary>
     Block? EmbedNote(string target) =>
@@ -25,7 +36,7 @@ public sealed partial class MainWindow
         AddHandler(DragDrop.DragOverEvent, (_, e) =>
         {
             if (!e.DataTransfer.Contains(DataFormat.File)) return;
-            e.DragEffects = _tab != null && !Editor.IsReadOnly ? DragDropEffects.Copy : DragDropEffects.None;
+            e.DragEffects = DragDropEffects.Copy;
             e.Handled = true;
         }, RoutingStrategies.Bubble, handledEventsToo: true);
         AddHandler(DragDrop.DropEvent, (_, e) =>
@@ -33,7 +44,11 @@ public sealed partial class MainWindow
             if (!e.DataTransfer.Contains(DataFormat.File)) return;
             e.Handled = true;
             var files = e.DataTransfer.TryGetFiles()?.Select(f => f.TryGetLocalPath()).OfType<string>().ToList() ?? [];
-            if (files.Count == 0 || _tab == null || Editor.IsReadOnly) return;
+            if (files.Count == 0) return;
+            bool canOpen = files.All(f => Directory.Exists(f) || FileAssoc.IsMarkdown(f));
+            bool inVault = _vault != null && files.All(f => IsUnder(_vault.Root, f));
+            if (canOpen && (_tab == null || Editor.IsReadOnly || _tab.External || !inVault)) { OpenExternal(files); return; }
+            if (_tab == null || Editor.IsReadOnly || _tab.External) return;
             // Брошено на текст — туда, иначе — к каретке.
             int offset = Editor.TextArea.Caret.Offset;
             var at = e.GetPosition(Editor);
@@ -97,8 +112,8 @@ public sealed partial class MainWindow
         var doc = Editor.Document;
         var links = paths.Select(p =>
         {
-            if (p.EndsWith(".md", StringComparison.OrdinalIgnoreCase) && _vault!.Get(p) is { } linked)
-                return $"[[{(_vault.Resolve(linked.Title, note) == linked ? linked.Title : linked.Rel[..^3])}]]";
+            if (FileAssoc.IsMarkdown(p) && _vault!.Get(p) is { } linked)
+                return $"[[{(_vault.Resolve(linked.Title, note) == linked ? linked.Title : linked.RelNoExt)}]]";
             string rel = Vault.LinkPath(note, p);
             return Vault.IsImage(p) ? $"![]({rel})" : $"[{Path.GetFileName(p).Replace("[", "(").Replace("]", ")")}]({rel})";
         });
@@ -123,7 +138,7 @@ public sealed partial class MainWindow
         foreach (var m in Markdown.Embeds(text))
             if (Markdown.EmbedSource(m) is var (src, wiki) && _vault.ResolveFile(src, _tab.Note, wiki) is { } p) return p;
         foreach (System.Text.RegularExpressions.Match m in Markdown.Link.Matches(text))
-            if (_vault.ResolveFile(Markdown.Unescape(m.Groups[2].Value), _tab.Note, false) is { } p && !p.EndsWith(".md", StringComparison.OrdinalIgnoreCase)) return p;
+            if (_vault.ResolveFile(Markdown.Unescape(m.Groups[2].Value), _tab.Note, false) is { } p && !FileAssoc.IsMarkdown(p)) return p;
         foreach (System.Text.RegularExpressions.Match m in Markdown.WikiLink.Matches(text))
             if (_vault.ResolveFile(m.Groups[1].Value, _tab.Note, true) is { } p) return p;
         return null;
@@ -182,7 +197,7 @@ public sealed partial class MainWindow
         else if (wiki || target.Contains("://") || target.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase)) return false;
         int hash = embed ? -1 : target.IndexOf('#');
         string src = embed && wiki ? target : Markdown.Unescape(hash < 0 ? target : target[..hash]);
-        if (src.EndsWith(".md", StringComparison.OrdinalIgnoreCase)) return false;
+        if (FileAssoc.IsMarkdown(src)) return false;
         if (_vault.ResolveFile(src, _tab.Note, wiki) is not { } file) return embed;
         _ = Launcher.LaunchFileInfoAsync(new FileInfo(file));
         return true;

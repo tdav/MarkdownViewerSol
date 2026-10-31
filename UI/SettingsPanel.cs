@@ -103,7 +103,8 @@ sealed class SettingsPanel : Panel
     readonly Settings _settings;
     readonly CommandPalette _palette;
     readonly Border _card;
-    TextBlock _fontName = null!, _vaultPath = null!, _attachName = null!;
+    TextBlock _fontName = null!, _vaultPath = null!, _attachName = null!, _assocText = null!;
+    Border _assocRemove = null!;
     Control? _returnFocus;
 
     public Segmented ThemeChoice { get; private set; } = null!;
@@ -118,6 +119,7 @@ sealed class SettingsPanel : Panel
     /// <summary>Настройки изменены: окно применяет их и сохраняет файл.</summary>
     public event Action? Changed;
     public event Action? PickVault;
+    public event Action<bool>? AssocToggle;
     /// <summary>Выбран язык интерфейса («ru» / «en»): окно ставит его и перестраивает подписи.</summary>
     public event Action<string>? LanguagePicked;
 
@@ -192,6 +194,10 @@ sealed class SettingsPanel : Panel
         var vaultRow = new DockPanel { Children = { pick, _vaultPath } };
         _attachName = Ui.Text("", 13);
         var attachButton = Button(_attachName, ChooseAttach);
+        _assocText = Ui.Text("", 13);
+        var assocPrimary = Button(_assocText, () => { if (!FileAssoc.IsRegistered()) AssocToggle?.Invoke(true); else FileAssoc.OpenDefaultSettings(); Refresh(); });
+        _assocRemove = Button(Ui.Text(Loc.T("set.assoc.remove"), 12.5, Skin.Mute), () => { AssocToggle?.Invoke(false); Refresh(); });
+        var assocControls = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { assocPrimary, _assocRemove } };
 
         var reset = Button(Ui.Text(Loc.T("set.reset"), 12.5, Skin.Mute), Reset);
         var done = Button(Ui.Text(Loc.T("common.done"), 13, Skin.AccentFg, FontWeight.Bold), Close, accent: true);
@@ -238,6 +244,7 @@ sealed class SettingsPanel : Panel
                 Group(Loc.T("set.g.work")),
                 Row(Loc.T("set.autosave"), Loc.T("set.autosave.hint"), AutosaveStepper),
                 Row(Loc.T("set.snap"), Loc.T("set.snap.hint"), HistoryStepper),
+                Row(Loc.T("set.assoc"), Loc.T("set.assoc.hint"), assocControls),
                 Group(Loc.T("act.keys")),
                 new TextBlock { Text = Loc.T("set.keys.hint"), FontSize = 11.5, Foreground = Skin.Mute, TextWrapping = TextWrapping.Wrap },
                 keyList,
@@ -344,6 +351,9 @@ sealed class SettingsPanel : Panel
         LangChoice.Show(Loc.Lang == Loc.Ru ? 0 : 1);
         _fontName.Text = _settings.Font ?? Loc.T("set.themefont", Skin.Font.Name);
         _attachName.Text = _settings.AttachFolder;
+        bool reg = FileAssoc.IsRegistered(), def = reg && FileAssoc.IsDefault();
+        _assocText.Text = def ? Loc.T("set.assoc.default") : reg ? Loc.T("set.assoc.reg") : Loc.T("set.assoc.none");
+        _assocRemove.IsVisible = reg;
         SizeStepper.Refresh();
         WidthStepper.Refresh();
         AutosaveStepper.Refresh();

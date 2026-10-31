@@ -189,7 +189,7 @@ public sealed partial class MainWindow
     /// <summary>Вкладка закрыта: правленный в этом сеансе текст — снимком в историю (у конфликта — как «ваша версия»).</summary>
     void OnTabClosed(Tab tab)
     {
-        if (HistoryOn && (tab.Edited || tab.Missing))
+        if (HistoryOn && !tab.Help && !tab.External && (tab.Edited || tab.Missing))
             _history!.Add(_vault!.Root, tab.Note.Rel, tab.Doc.Text, tab.Conflict ? "mine" : "close");
     }
 
@@ -208,7 +208,7 @@ public sealed partial class MainWindow
         if (_drafts == null || _vault is not { ReadOnly: false } vault) return;
         foreach (var tab in _tabs.Concat(_recent).Distinct())
         {
-            if (!tab.Dirty && !tab.Missing) continue;
+            if ((!tab.Dirty && !tab.Missing) || tab.Help || tab.External) continue;
             string text = tab.Doc.Text;
             if (text == tab.DraftText) continue;
             _drafts.Write(vault.Root, tab.Note.Path, text, tab.Note.Text);
@@ -229,7 +229,7 @@ public sealed partial class MainWindow
         _draftTimer.Stop();
         if (_vault is not { ReadOnly: false } vault) return;
         foreach (var tab in _tabs.Concat(_recent).Distinct())
-            if (HistoryOn && (tab.Edited || tab.Missing))
+            if (HistoryOn && !tab.Help && !tab.External && (tab.Edited || tab.Missing))
                 _history!.Add(vault.Root, tab.Note.Rel, tab.Doc.Text, tab.Conflict ? "mine" : "close");
         WriteDrafts();
         _history?.Flush();
@@ -303,7 +303,7 @@ public sealed partial class MainWindow
 
     void ShowHistory()
     {
-        if (_tab == null || !HistoryOn) return;
+        if (_tab == null || _tab.External || _tab.Help || !HistoryOn) return;
         var tab = _tab;
         var items = _history!.List(_vault!.Root, tab.Note.Rel)
             .Select(s => new VersionItem(When(s.Time), $"{s.ReasonText} · {SizeText(s.Size)}", () => History.Read(s))).ToList();

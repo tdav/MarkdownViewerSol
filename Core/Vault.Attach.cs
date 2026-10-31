@@ -51,7 +51,7 @@ public sealed partial class Vault
                 return File.Exists(full) ? full : null;
             }
             src = src.Replace('\\', '/').Trim();
-            if (!System.IO.Path.HasExtension(src) || src.EndsWith(".md", StringComparison.OrdinalIgnoreCase)) return null; // это заметка
+            if (!System.IO.Path.HasExtension(src) || FileAssoc.IsMarkdown(src)) return null; // это заметка
             foreach (var baseDir in new[] { Root, dir, AttachDir(from) })
             {
                 string full = System.IO.Path.GetFullPath(System.IO.Path.Combine(baseDir, src.TrimStart('/')));
@@ -76,13 +76,12 @@ public sealed partial class Vault
             {
                 foreach (var f in Directory.EnumerateFiles(d))
                 {
-                    if (f.EndsWith(".md", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".leaflet-tmp", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (FileAssoc.IsMarkdown(f) || f.EndsWith(".leaflet-tmp", StringComparison.OrdinalIgnoreCase)) continue;
                     string key = System.IO.Path.GetFileName(f).ToLowerInvariant();
                     if (!map.TryGetValue(key, out var list)) map[key] = list = [];
                     list.Add(f);
                 }
-                foreach (var sub in Directory.EnumerateDirectories(d))
-                    if (!System.IO.Path.GetFileName(sub).StartsWith('.')) Walk(sub);
+                if (!Shallow) foreach (var sub in Directory.EnumerateDirectories(d)) if (!SkippedDir(System.IO.Path.GetFileName(sub))) Walk(sub);
             }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }

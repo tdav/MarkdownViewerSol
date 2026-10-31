@@ -53,14 +53,27 @@ static class Program
         bool quiet = args.Contains("--quiet");
         try
         {
+            var settings = Settings.Load(readOnly: false);
             if (args.Contains("--register"))
             {
                 FileAssoc.Register(FileAssoc.ExePath);
-                if (!quiet) Message(Loc.T("prog.registered"));
+                settings[FileAssoc.SettingsKey] = "1";
+                settings.Save();
+                if (!quiet)
+                {
+                    if (!FileAssoc.IsDefault())
+                    {
+                        FileAssoc.OpenDefaultSettings();
+                        Message(Loc.T("prog.registered.pick"));
+                    }
+                    else Message(Loc.T("prog.registered"));
+                }
             }
             else
             {
                 FileAssoc.Unregister();
+                settings[FileAssoc.SettingsKey] = "0";
+                settings.Save();
                 if (!quiet) Message(Loc.T("prog.unregistered"));
             }
             return 0;

@@ -17,7 +17,8 @@ public sealed class Note
     public DateTime Modified;
 
     public string TitleKey => Title.ToLowerInvariant();
-    public string RelKey => Rel[..^3].ToLowerInvariant();
+    public string RelNoExt => FileAssoc.StripExt(Rel);
+    public string RelKey => RelNoExt.ToLowerInvariant();
 }
 
 public readonly record struct Backlink(Note From, string Snippet, int MatchStart, int MatchLength, int Offset);
@@ -35,12 +36,34 @@ public sealed partial class Vault
     readonly HashSet<string> _pending = new(StringComparer.OrdinalIgnoreCase);
 
     public string Root { get; }
-    public string Name => System.IO.Path.GetFileName(Root.TrimEnd('\\', '/'));
+    public string Name => System.IO.Path.GetFileName(Root) is { Length: > 0 } n ? n : Root;
+    public bool Shallow { get; }
     public bool ReadOnly { get; init; }
     public bool Loaded { get; private set; }
     public IReadOnlyCollection<Note> Notes => _byPath.Values;
 
-    public Vault(string root) => Root = System.IO.Path.GetFullPath(root).TrimEnd('\\', '/');
+    static readonly HashSet<string> HeavyDirs = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "node_modules", "bin", "obj", "packages", "target", "dist", "build", "vendor",
+        "AppData", "Windows", "Program Files", "Program Files (x86)", "ProgramData", "$Recycle.Bin", "System Volume Information"
+    };
+
+    internal static bool SkippedDir(string name) => name.StartsWith('.') || HeavyDirs.Contains(name);
+
+    static bool IsBroadFolder(string dir)
+    {
+        if (System.IO.Path.GetPathRoot(dir) is { } r && string.Equals(System.IO.Path.TrimEndingDirectorySeparator(r), dir, StringComparison.OrdinalIgnoreCase))
+            return true;
+        string user = System.IO.Path.TrimEndingDirectorySeparator(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        string temp = System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetTempPath());
+        return string.Equals(dir, user, StringComparison.OrdinalIgnoreCase) || string.Equals(dir, temp, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public Vault(string root)
+    {
+        Root = System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(root));
+        Shallow = IsBroadFolder(Root);
+    }
 
     // ---- загрузка ----
 
@@ -48,19 +71,20 @@ public sealed partial class Vault
     public List<Note> Scan()
     {
         var files = new List<string>();
-        Collect(Root, files);
+        Collect(Root, files, Shallow);
         var notes = new Note?[files.Count];
         Parallel.For(0, files.Count, i => notes[i] = Read(files[i]));
         return notes.Where(n => n != null).ToList()!;
     }
 
-    static void Collect(string dir, List<string> files)
+    static void Collect(string dir, List<string> files, bool shallow = false)
     {
         try
         {
-            files.AddRange(Directory.EnumerateFiles(dir, "*.md"));
-            foreach (var sub in Directory.EnumerateDirectories(dir))
-                if (!System.IO.Path.GetFileName(sub).StartsWith('.')) Collect(sub, files); // .obsidian, .git, .trash
+            foreach (var f in Directory.EnumerateFiles(dir))
+                if (FileAssoc.IsMarkdown(f) && !f.EndsWith(".leaflet-tmp", StringComparison.OrdinalIgnoreCase)) files.Add(f);
+            if (!shallow) foreach (var sub in Directory.EnumerateDirectories(dir))
+                if (!SkippedDir(System.IO.Path.GetFileName(sub))) Collect(sub, files); // .obsidian, .git, .trash, node_modules, bin/obj
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
@@ -295,7 +319,7 @@ public sealed partial class Vault
         name = name.Replace('\\', '/').Trim().Trim('/');
         int hash = name.IndexOf('#');
         if (hash >= 0) name = name[..hash].Trim();
-        if (name.EndsWith(".md", StringComparison.OrdinalIgnoreCase)) name = name[..^3];
+        name = FileAssoc.StripExt(name);
         var parts = name.Split('/', StringSplitOptions.RemoveEmptyEntries).Select(Clean).Where(p => p.Length > 0).ToList();
         if (parts.Count == 0) parts.Add(Loc.T("note.untitled"));
         string title = parts[^1];
@@ -334,7 +358,7 @@ public sealed partial class Vault
     public (string Path, string Title) Target(string folder, string title)
     {
         title = title.Trim();
-        if (title.EndsWith(".md", StringComparison.OrdinalIgnoreCase)) title = title[..^3];
+        title = FileAssoc.StripExt(title);
         title = Clean(title.Replace('/', '-').Replace('\\', '-'));
         var parts = folder.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries).Select(Clean).Where(p => p.Length > 0);
         return (System.IO.Path.Combine([Root, .. parts, title + ".md"]), title);
@@ -380,7 +404,7 @@ public sealed partial class Vault
         var changed = new List<Note>();
         foreach (var (n, links) in refs)
         {
-            string byName = ResolveKey(note.TitleKey, n) == note ? note.Title : note.Rel[..^3];
+            string byName = ResolveKey(note.TitleKey, n) == note ? note.Title : note.RelNoExt;
             var sb = new StringBuilder(n.Text.Length + 64);
             int pos = 0;
             foreach (var m in links)
@@ -389,7 +413,7 @@ public sealed partial class Vault
                 int hash = g.Value.IndexOf('#');
                 string target = hash >= 0 ? g.Value[..hash] : g.Value;
                 sb.Append(n.Text, pos, g.Index - pos)
-                  .Append(target.Contains('/') || target.Contains('\\') ? note.Rel[..^3] : byName)
+                  .Append(target.Contains('/') || target.Contains('\\') ? note.RelNoExt : byName)
                   .Append(hash >= 0 ? g.Value[hash..] : "");
                 pos = g.Index + g.Length;
             }
@@ -459,9 +483,11 @@ public sealed partial class Vault
     public void Watch(Action<string[]> onBatch)
     {
         if (ReadOnly) return;
+        try
+        {
         _watcher = new FileSystemWatcher(Root)
         {
-            IncludeSubdirectories = true,
+            IncludeSubdirectories = !Shallow,
             NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite,
         };
         _watchTimer = new Timer(_ =>
@@ -481,6 +507,8 @@ public sealed partial class Vault
         _watcher.Deleted += (_, e) => Queue(e.FullPath);
         _watcher.Renamed += (_, e) => { Queue(e.OldFullPath); Queue(e.FullPath); };
         _watcher.EnableRaisingEvents = true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { _watcher?.Dispose(); _watcher = null; }
     }
 
     public void StopWatching()
@@ -502,10 +530,10 @@ public sealed partial class Vault
         foreach (var raw in paths)
         {
             string path = System.IO.Path.GetFullPath(raw);
-            if (!path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)) _files = null; // вложение появилось, пропало или переименовано
+            if (!FileAssoc.IsMarkdown(path)) _files = null; // вложение появилось, пропало или переименовано
             if (File.Exists(path))
             {
-                if (!path.EndsWith(".md", StringComparison.OrdinalIgnoreCase) || IsHidden(path)) continue;
+                if (!FileAssoc.IsMarkdown(path) || IsHidden(path)) continue;
                 var fresh = Read(path);
                 if (fresh == null) continue;
                 if (_byPath.TryGetValue(path, out var note))
@@ -518,7 +546,7 @@ public sealed partial class Vault
             }
             else if (Directory.Exists(path))
             {
-                if (IsHidden(path + "\\x")) continue;
+                if (Shallow || IsHidden(path + "\\x")) continue;
                 var files = new List<string>();
                 Collect(path, files);
                 foreach (var f in files)
@@ -603,5 +631,5 @@ public sealed partial class Vault
     }
 
     bool IsHidden(string path) =>
-        System.IO.Path.GetRelativePath(Root, path).Split('\\', '/').SkipLast(1).Any(p => p.StartsWith('.'));
+        System.IO.Path.GetRelativePath(Root, path).Split('\\', '/').SkipLast(1).Any(SkippedDir);
 }

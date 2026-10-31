@@ -26,6 +26,7 @@ sealed class Tab(Note note, TextDocument doc)
     public bool Missing;      // файл удалён или перенесён снаружи: текст только во вкладке
     public string? DraftText; // последний записанный черновик (null — черновика нет)
     public bool Help;         // справка из ресурсов exe: только чтение, на диск не пишется, в хранилище её нет
+    public bool External;     // отдельный файл снаружи текущего хранилища: открывается вкладкой и сохраняется напрямую
 }
 
 public sealed partial class MainWindow : Window
@@ -67,7 +68,7 @@ public sealed partial class MainWindow : Window
             else if (args[i] == "--data") data = args[++i];
             else if (args[i] == "--lang") i++;
             else if (args[i] == "--crashtest") _crashTest = true;
-            else if (!args[i].StartsWith("--")) { if (path == null) path = args[i]; else extra.Add(args[i]); }
+            else if (!args[i].StartsWith("--") || File.Exists(args[i]) || Directory.Exists(args[i])) { if (path == null) path = args[i]; else extra.Add(args[i]); }
         }
         _bench = bench >= 0 || fontCheck != null;
         _settings = Settings.Load(readOnly: _bench || selfTest != null || _crashTest);
@@ -136,12 +137,19 @@ public sealed partial class MainWindow : Window
         ApplyPrefs(force: true);
         SetReadMode(false);
 
-        // Папка: из командной строки (файл — его папка) или последняя открытая.
+        // Папка: из командной строки (файл — его папка или охватывающее хранилище) или последняя открытая.
         string? openFile = null, root = null;
-        if (path != null && File.Exists(path)) { openFile = Path.GetFullPath(path); root = Path.GetDirectoryName(openFile); }
-        else if (path != null && Directory.Exists(path)) root = path;
+        bool rememberVault = false;
+        if (path != null && File.Exists(path))
+        {
+            openFile = Path.GetFullPath(path);
+            root = _settings["vault"] is { } saved && Directory.Exists(saved) && IsUnder(saved, openFile)
+                ? saved
+                : Path.GetDirectoryName(openFile);
+        }
+        else if (path != null && Directory.Exists(path)) { root = path; rememberVault = true; }
         else if (_settings["vault"] is { } last && Directory.Exists(last)) root = last;
-        if (root != null) SetVault(root, openFile);
+        if (root != null) SetVault(root, openFile, rememberVault);
         else ShowWelcome(true);
         foreach (var more in extra) OpenExternal([Path.GetFullPath(more)], raise: false);
 
@@ -168,13 +176,28 @@ public sealed partial class MainWindow : Window
         Opened += (_, _) =>
         {
             if (_tab != null) Editor.Focus();
-            if (data == null) DesktopShortcut.EnsureFirstRun(_settings, FileAssoc.ExePath);
+            if (data == null && !_settings.ReadOnly)
+            {
+                DesktopShortcut.EnsureFirstRun(_settings, FileAssoc.ExePath);
+                if (FileAssoc.EnsureFirstRun(_settings, FileAssoc.ExePath) && !FileAssoc.IsDefault())
+                    ShowAssocBanner();
+            }
+        };
+        Activated += (_, _) =>
+        {
+            if (_assocBanner.IsVisible && FileAssoc.IsDefault())
+            {
+                _assocBanner.Hide();
+                _settingsPanel.Refresh();
+                _notice = Loc.T("shell.default.ok");
+                UpdateStatus();
+            }
         };
     }
 
     // ---------- хранилище ----------
 
-    void SetVault(string root, string? openFile = null)
+    void SetVault(string root, string? openFile = null, bool rememberVault = true)
     {
         SaveAll();
         _vault?.StopWatching();
@@ -184,7 +207,7 @@ public sealed partial class MainWindow : Window
         _back.Clear();
         _forward.Clear();
         var vault = _vault = new Vault(root) { ReadOnly = _bench, AttachFolder = _settings.AttachFolder };
-        _settings["vault"] = vault.Root;
+        if (rememberVault) _settings["vault"] = vault.Root;
         _settingsPanel.SetVault(vault.Root);
         ShowWelcome(false);
         _side.SetVault(vault);
@@ -218,7 +241,73 @@ public sealed partial class MainWindow : Window
         {
             Title = Loc.T("pick.folder.title"), AllowMultiple = false,
         });
-        if (folders.Count > 0 && folders[0].TryGetLocalPath() is { } local) SetVault(local);
+        if (folders.Count > 0 && folders[0].TryGetLocalPath() is { } local) SetVault(local, rememberVault: true);
+    }
+
+    async Task PickFile()
+    {
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = Loc.T("pick.file.title"),
+            AllowMultiple = true,
+            FileTypeFilter =
+            [
+                new FilePickerFileType("Markdown") { Patterns = ["*.md", "*.markdown", "*.mdown", "*.mkd"] },
+            ],
+        });
+        var paths = files.Select(f => f.TryGetLocalPath()).OfType<string>().ToList();
+        if (paths.Count > 0) OpenExternal(paths, raise: false);
+    }
+
+    /// <summary>Открывает отдельный Markdown-файл снаружи текущего хранилища в новой вкладке, не закрывая открытые заметки.</summary>
+    void OpenStandaloneFile(string fullPath)
+    {
+        SaveTab(_tab);
+        var tab = _tabs.Find(t => SamePath(t.Note.Path, fullPath)) ?? _recent.Find(t => SamePath(t.Note.Path, fullPath));
+        try
+        {
+            if (tab == null)
+            {
+                string text = File.ReadAllText(fullPath);
+                var note = new Note
+                {
+                    Path = fullPath,
+                    Rel = Path.GetFileName(fullPath),
+                    Title = Path.GetFileNameWithoutExtension(fullPath),
+                    Folder = Path.GetDirectoryName(fullPath) ?? "",
+                    Text = text,
+                    Links = Markdown.LinkKeys(text),
+                    Tags = Markdown.TagKeys(text),
+                    Modified = File.GetLastWriteTime(fullPath),
+                };
+                tab = new Tab(note, new TextDocument(text)) { External = true };
+                var t = tab;
+                tab.Doc.Changed += (_, _) => OnDocChanged(t);
+            }
+            else if (!tab.Dirty)
+            {
+                string disk = File.ReadAllText(fullPath);
+                tab.Note.Text = disk;
+                tab.Note.Modified = File.GetLastWriteTime(fullPath);
+                if (tab.Doc.Text != disk) Reload(tab, disk);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _notice = Loc.T("common.fail") + ex.Message;
+            UpdateStatus();
+            return;
+        }
+        if (!_tabs.Contains(tab))
+        {
+            _recent.Remove(tab);
+            _recent.Add(tab);
+            if (_recent.Count > 30) _recent.RemoveAt(0);
+            int at = _tab == null ? _tabs.Count : _tabs.IndexOf(_tab);
+            _tabs.Insert(Math.Min(at + 1, _tabs.Count), tab);
+        }
+        ShowWelcome(false);
+        Activate(tab);
     }
 
     void ShowWelcome(bool show)
@@ -267,7 +356,7 @@ public sealed partial class MainWindow : Window
         int line = Editor.TextArea.Caret.Line;
         if (line == 1) Editor.ScrollToHome();
         else Dispatcher.UIThread.Post(() => { if (_tab == tab) Editor.ScrollToLine(line); }, DispatcherPriority.Loaded);
-        if (_vault != null && !tab.Help) _settings["last:" + _vault.Root] = tab.Note.Rel;
+        if (_vault != null && !tab.Help && !tab.External) _settings["last:" + _vault.Root] = tab.Note.Rel;
         ShowNote(tab);
         Editor.Focus();
     }
@@ -324,19 +413,20 @@ public sealed partial class MainWindow : Window
 
     void OpenLink(string target, bool wiki)
     {
-        if (_vault == null) return;
         if (OpenFileLink(target, wiki)) return;
         if (!wiki)
         {
             if (Uri.TryCreate(target, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https" or "mailto")
                 _ = Launcher.LaunchUriAsync(uri);
-            else if (_tab != null && Uri.UnescapeDataString(target).EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+            else if (_tab != null && FileAssoc.IsMarkdown(Uri.UnescapeDataString(target)))
             {
                 string file = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(_tab.Note.Path)!, Uri.UnescapeDataString(target)));
-                if (_vault.Get(file) is { } linked) Open(linked);
+                if (_vault != null && !_tab.External && _vault.Get(file) is { } linked) Open(linked);
+                else if (File.Exists(file)) OpenExternal([file], raise: false);
             }
             return;
         }
+        if (_vault == null || _tab?.External == true) return;
         SaveTab(_tab); // чтобы новая заметка сразу видела обратную ссылку
         var note = _vault.Resolve(target, _tab?.Note);
         if (note == null)
@@ -412,7 +502,32 @@ public sealed partial class MainWindow : Window
 
     void SaveTab(Tab? tab)
     {
-        if (tab == null || !tab.Dirty || tab.Help || _vault == null || tab.Conflict || tab.Missing) return; // конфликт и пропавший файл ждут решения
+        if (tab == null || !tab.Dirty || tab.Help || tab.Conflict || tab.Missing) return; // конфликт и пропавший файл ждут решения
+        if (tab.External)
+        {
+            if (_bench) return;
+            try
+            {
+                string text = tab.Doc.Text;
+                string tmp = tab.Note.Path + ".leaflet-tmp";
+                File.WriteAllText(tmp, text, new System.Text.UTF8Encoding(false));
+                File.Move(tmp, tab.Note.Path, overwrite: true);
+                tab.Note.Text = text;
+                tab.Note.Links = Markdown.LinkKeys(text);
+                tab.Note.Tags = Markdown.TagKeys(text);
+                tab.Note.Modified = File.GetLastWriteTime(tab.Note.Path);
+                tab.Dirty = false;
+                _savedAt = DateTime.Now;
+                _saveError = null;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _saveError = ex.Message;
+            }
+            if (tab == _tab) UpdateStatus();
+            return;
+        }
+        if (_vault == null) return;
         // Файл поменяли снаружи, а слежение ещё не успело: не затираем, а разбираем как правку снаружи.
         if (_vault.ChangedOnDisk(tab.Note))
         {
@@ -596,15 +711,18 @@ public sealed partial class MainWindow : Window
     /// <summary>Выбор в палитре: эта заметка в HTML или PDF, все заметки в папку.</summary>
     void PromptExport()
     {
-        if (_vault == null) return;
+        if (_vault == null && _tab == null) return;
         var items = new List<PaletteItem>();
         if (_tab?.Note is { } note)
         {
             items.Add(new(Loc.T("exp.html.item", note.Title), "Enter", () => _ = PromptExport(note, false), Loc.T("exp.html.sub")));
             items.Add(new(Loc.T("exp.pdf.item", note.Title), null, () => _ = PromptExport(note, true), Loc.T("exp.pdf.sub")));
         }
-        items.Add(new(Loc.T("exp.all.html"), items.Count == 0 ? "Enter" : null, () => _ = PromptExportAll(".html"), Loc.T("exp.all.html.sub")));
-        items.Add(new(Loc.T("exp.all.pdf"), null, () => _ = PromptExportAll(".pdf"), Loc.T("exp.all.pdf.sub")));
+        if (_vault != null)
+        {
+            items.Add(new(Loc.T("exp.all.html"), items.Count == 0 ? "Enter" : null, () => _ = PromptExportAll(".html"), Loc.T("exp.all.html.sub")));
+            items.Add(new(Loc.T("exp.all.pdf"), null, () => _ = PromptExportAll(".pdf"), Loc.T("exp.all.pdf.sub")));
+        }
         _palette.Open("⇪", Loc.T("exp.ph"), q => items
             .Select(i => (i, s: CommandPalette.Score(i.Title, q.Trim()))).Where(x => x.s >= 0).OrderBy(x => x.s).Select(x => x.i).ToList());
     }
@@ -835,6 +953,11 @@ public sealed partial class MainWindow : Window
     {
         if (_tab == null) { _crumb.Text = _vault?.Name ?? ""; return; }
         var n = _tab.Note;
+        if (_tab.External)
+        {
+            _crumb.Text = n.Path;
+            return;
+        }
         _crumb.Text = Skin.IsTerminal
             ? $"~/{_vault?.Name}/{n.Rel}"
             : string.Join("  ›  ", n.Folder.Split('/', StringSplitOptions.RemoveEmptyEntries).Append(n.Title));
@@ -845,7 +968,7 @@ public sealed partial class MainWindow : Window
     /// <summary>Обратные ссылки (при смене заметки), структура, теги и счётчики (после паузы в наборе).</summary>
     void UpdateNoteInfo(bool full)
     {
-        if (_tab == null || _vault == null)
+        if (_tab == null)
         {
             _right.ShowBacklinks([]);
             _right.ShowOutline(new TextDocument(), Preview.Blocks);
@@ -853,7 +976,8 @@ public sealed partial class MainWindow : Window
             UpdateStatus();
             return;
         }
-        if (full && _right.IsVisible) _right.ShowBacklinks(_vault.Backlinks(_tab.Note));
+        if (full && _right.IsVisible)
+            _right.ShowBacklinks(_vault != null && !_tab.External && !_tab.Help ? _vault.Backlinks(_tab.Note) : []);
         if (_right.IsVisible) { _right.ShowOutline(_tab.Doc, Preview.Blocks); _right.SetCaretLine(Editor.TextArea.Caret.Line); }
         string text = _tab.Doc.Text;
         _words = Markdown.CountWords(text);
@@ -897,7 +1021,7 @@ public sealed partial class MainWindow : Window
         ["replaceall"] = () => PromptReplaceAll(),
         ["read"] = () => SetReadMode(!Preview.ReadMode),
         ["folder"] = () => _ = PickFolder(),
-        ["rename"] = () => { if (_tab != null) PromptRename(_tab.Note); },
+        ["rename"] = () => { if (_tab != null && !_tab.External && !_tab.Help) PromptRename(_tab.Note); },
         ["export"] = PromptExport,
         ["save"] = SaveAll,
         ["close"] = () => { if (_tab != null) CloseTab(_tab); },
@@ -917,13 +1041,14 @@ public sealed partial class MainWindow : Window
 
     List<PaletteItem> Commands()
     {
-        var all = new List<PaletteItem>
-        {
+        List<PaletteItem> all =
+        [
             new(Loc.T("cmd.open"), K("open"), QuickOpen),
             new(Loc.T("cmd.new"), K("new"), PromptNewNote),
             new(Loc.T("cmd.search"), K("search"), FocusSearch),
             new(Loc.T("cmd.replaceall"), K("replaceall"), () => PromptReplaceAll(), Loc.T("cmd.replaceall.sub")),
             new(Loc.T("cmd.toggleread"), K("read"), () => SetReadMode(!Preview.ReadMode)),
+            new(Loc.T("cmd.openfile"), null, () => _ = PickFile()),
             new(Loc.T("cmd.folder"), K("folder"), () => _ = PickFolder()),
             new(Loc.T(ThemeCommand(Skin.Kind)), K("theme"), () => SetTheme(Skin.Next(Skin.Kind))),
             new(_side.IsVisible ? Loc.T("cmd.side.hide") : Loc.T("cmd.side.show"), K("sidebar"), ToggleSidebar),
@@ -936,26 +1061,35 @@ public sealed partial class MainWindow : Window
             new(Loc.T("cmd.settings"), K("settings"), OpenSettings),
             new(Loc.T("cmd.keys"), K("keys"), ShowKeys),
             new(Loc.T("cmd.lang"), null, () => SetLanguage(Loc.Other)),
+            .. (FileAssoc.IsRegistered() && !FileAssoc.IsDefault()
+                ? new PaletteItem[] { new(Loc.T("cmd.setdefault"), null, () => FileAssoc.OpenDefaultSettings(), Loc.T("cmd.setdefault.sub")) }
+                : []),
             FileAssoc.IsRegistered()
                 ? new(Loc.T("cmd.unregister"), null, () => Association(register: false), Loc.T("cmd.assoc.sub"))
                 : new(Loc.T("cmd.register"), null, () => Association(register: true), Loc.T("cmd.assoc.sub")),
             new(Loc.T("cmd.manual"), null, OpenManual, Loc.T("cmd.manual.sub")),
             new(Loc.T("cmd.help"), null, OpenHelp, "dalink.to/olegche"),
-        };
+        ];
         if (_pendingDrafts.Count > 0)
             all.Insert(0, new(Loc.T("cmd.recover"), null, ShowRecovery, Loc.Plural(_pendingDrafts.Count, "pl.draft")));
         if (_tab?.Note is { } note)
+        {
+            bool inVault = _vault != null && !_tab.External && !_tab.Help;
             all.InsertRange(2,
             [
-                .. HistoryOn ? new PaletteItem[] { new(Loc.T("cmd.history"), null, ShowHistory, Loc.T("cmd.history.sub")) } : [],
+                .. (inVault && HistoryOn ? new PaletteItem[] { new(Loc.T("cmd.history"), null, ShowHistory, Loc.T("cmd.history.sub")) } : []),
                 new(Loc.T("cmd.find"), K("find"), () => OpenFind(false)),
                 new(Loc.T("cmd.replace"), K("replace"), () => OpenFind(true)),
-                new(Loc.T("cmd.rename"), K("rename"), () => PromptRename(note)),
-                new(Loc.T("cmd.move"), null, () => PromptMove(note)),
-                new(Loc.T("cmd.delete"), null, () => PromptDelete(note)),
+                .. (inVault ? new PaletteItem[]
+                {
+                    new(Loc.T("cmd.rename"), K("rename"), () => PromptRename(note)),
+                    new(Loc.T("cmd.move"), null, () => PromptMove(note)),
+                    new(Loc.T("cmd.delete"), null, () => PromptDelete(note)),
+                } : []),
                 new(Loc.T("cmd.export.html"), null, () => _ = PromptExport(note, false)),
                 new(Loc.T("cmd.export.pdf"), null, () => _ = PromptExport(note, true)),
             ]);
+        }
         if (AttachmentAtCaret() is { } file)
             all.Insert(2, new(Loc.T("cmd.rename.attach"), null, () => PromptRenameAttachment(file), Path.GetFileName(file)));
         if (_tab != null && Preview.Blocks.IsTable(Editor.TextArea.Caret.Line))

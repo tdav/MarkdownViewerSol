@@ -44,12 +44,12 @@ public static partial class Markdown
     [GeneratedRegex(@"^\[\^([^\[\]\s]+)\]:[ \t]?")]
     private static partial Regex FootnoteDefRegex();
 
-    /// <summary>Вставка ![[…]] ведёт на заметку, а не на файл: нет расширения или .md.</summary>
+    /// <summary>Вставка ![[…]] ведёт на заметку, а не на файл: нет расширения или Markdown-расширение.</summary>
     public static bool IsNoteEmbed(string target)
     {
         int hash = target.IndexOf('#');
         string name = (hash < 0 ? target : target[..hash]).Trim();
-        return !Path.HasExtension(name) || name.EndsWith(".md", StringComparison.OrdinalIgnoreCase);
+        return !Path.HasExtension(name) || FileAssoc.IsMarkdown(name);
     }
 
     /// <summary>
@@ -113,7 +113,7 @@ public static partial class Markdown
         int hash = target.IndexOf('#');
         if (hash >= 0) target = target[..hash];
         target = target.Trim().Replace('\\', '/');
-        if (target.EndsWith(".md", StringComparison.OrdinalIgnoreCase)) target = target[..^3];
+        target = FileAssoc.StripExt(target);
         return target.ToLowerInvariant();
     }
 

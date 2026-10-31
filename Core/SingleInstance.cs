@@ -29,7 +29,7 @@ static class SingleInstance
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] is "--data" or "--lang" or "--bench" or "--fontcheck" or "--selftest" or "--only" or "--dpicheck") { i++; continue; }
-            if (args[i].StartsWith("--", StringComparison.Ordinal)) continue;
+            if (args[i].StartsWith("--", StringComparison.Ordinal) && !File.Exists(args[i]) && !Directory.Exists(args[i])) continue;
             try { list.Add(Path.GetFullPath(args[i])); } catch (ArgumentException) { }
         }
         return list;

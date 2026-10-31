@@ -191,25 +191,37 @@ public sealed partial class MainWindow
         {
             if (Directory.Exists(p))
             {
-                if (_vault == null || !SamePath(_vault.Root, p)) SetVault(p);
+                if (_vault == null || !SamePath(_vault.Root, p)) SetVault(p, rememberVault: true);
             }
-            else if (File.Exists(p) && p.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+            else if (File.Exists(p) && FileAssoc.IsMarkdown(p))
             {
-                if (_vault != null && IsUnder(_vault.Root, p))
+                string full = Path.GetFullPath(p);
+                if (_vault != null && IsUnder(_vault.Root, full))
                 {
-                    if ((_vault.Get(p) ?? _vault.Add(p)) is { } note) Open(note, newTab: true);
+                    if ((_vault.Get(full) ?? _vault.Add(full)) is { } note) Open(note, newTab: true);
                 }
-                else SetVault(Path.GetDirectoryName(p)!, p);
+                else if (_vault == null || _tabs.Count == 0)
+                {
+                    SetVault(Path.GetDirectoryName(full)!, full, rememberVault: false);
+                }
+                else
+                {
+                    OpenStandaloneFile(full);
+                }
             }
             else { _notice = Loc.T("shell.nofile") + p; UpdateStatus(); }
         }
     }
 
     static bool SamePath(string a, string b) =>
-        string.Equals(Path.GetFullPath(a).TrimEnd('\\', '/'), Path.GetFullPath(b).TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
+        string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(a)), Path.TrimEndingDirectorySeparator(Path.GetFullPath(b)), StringComparison.OrdinalIgnoreCase);
 
-    static bool IsUnder(string root, string path) =>
-        Path.GetFullPath(path).StartsWith(Path.GetFullPath(root).TrimEnd('\\', '/') + "\\", StringComparison.OrdinalIgnoreCase);
+    static bool IsUnder(string root, string path)
+    {
+        string r = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        string prefix = r.EndsWith(Path.DirectorySeparatorChar) ? r : r + Path.DirectorySeparatorChar;
+        return Path.GetFullPath(path).StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+    }
 
     void BringToFront()
     {
@@ -222,15 +234,41 @@ public sealed partial class MainWindow
         Activate();
     }
 
-    // ---------- «Открыть с помощью» ----------
+    // ---------- регистрация типов файлов .md / .markdown ----------
+
+    void ShowAssocBanner()
+    {
+        _assocBanner.Show(Loc.T("assoc.banner"),
+            (Loc.T("assoc.setdefault"), () => FileAssoc.OpenDefaultSettings()),
+            (Loc.T("assoc.later"), () => _assocBanner.Hide()));
+    }
 
     void Association(bool register)
     {
         try
         {
-            if (register) FileAssoc.Register(FileAssoc.ExePath); else FileAssoc.Unregister();
+            if (register)
+            {
+                FileAssoc.Register(FileAssoc.ExePath);
+                _settings[FileAssoc.SettingsKey] = "1";
+                _settings.Save();
+                if (!FileAssoc.IsDefault())
+                {
+                    ShowAssocBanner();
+                    FileAssoc.OpenDefaultSettings();
+                }
+                else _assocBanner.Hide();
+            }
+            else
+            {
+                FileAssoc.Unregister();
+                _settings[FileAssoc.SettingsKey] = "0";
+                _settings.Save();
+                _assocBanner.Hide();
+            }
+            _settingsPanel.Refresh();
             _notice = register
-                ? Loc.T("shell.registered")
+                ? (FileAssoc.IsDefault() ? Loc.T("shell.default.ok") : Loc.T("shell.registered"))
                 : Loc.T("shell.unregistered");
         }
         catch (Exception e) when (e is UnauthorizedAccessException or System.Security.SecurityException or IOException)

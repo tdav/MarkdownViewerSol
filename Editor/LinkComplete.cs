@@ -137,7 +137,7 @@ public sealed class LinkComplete
 
     /// <summary>Как заметка записывается в ссылку: по имени, а если имя встречается дважды — с путём.</summary>
     static string NameFor(Vault vault, Note note, Note? from) =>
-        vault.Resolve(note.Title, from) == note ? note.Title : note.Rel[..^3];
+        vault.Resolve(note.Title, from) == note ? note.Title : note.RelNoExt;
 
     List<Item> NoteItems(Vault vault, string q)
     {
@@ -155,7 +155,7 @@ public sealed class LinkComplete
 
     static int BestScore(Note n, string q)
     {
-        int a = CommandPalette.Score(n.Title, q), b = q.Contains('/') ? CommandPalette.Score(n.Rel[..^3], q) : -1;
+        int a = CommandPalette.Score(n.Title, q), b = q.Contains('/') ? CommandPalette.Score(n.RelNoExt, q) : -1;
         return a < 0 ? b : b < 0 ? a : Math.Min(a, b);
     }
 

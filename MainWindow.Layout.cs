@@ -19,10 +19,10 @@ public sealed partial class MainWindow
     RightPanel _right = null!;
     CommandPalette _palette = null!;
     SettingsPanel _settingsPanel = null!;
-    FileBanner _banner = null!;
+    FileBanner _banner = null!, _assocBanner = null!;
     HistoryPanel _historyPanel = null!;
     TextBlock _crumb = null!, _stMode = null!, _stFile = null!, _stStats = null!, _stPos = null!, _stSaved = null!, _stEnc = null!;
-    TextBlock _helpText = null!, _emptyText = null!, _welcomeKeys = null!, _welcomeOpen = null!, _welcomeHelp = null!, _welcomeBlurb = null!;
+    TextBlock _helpText = null!, _emptyText = null!, _welcomeKeys = null!, _welcomeOpen = null!, _welcomeOpenFile = null!, _welcomeHelp = null!, _welcomeBlurb = null!;
     Control _helpIcon = null!;
     Border _segEdit = null!, _segRead = null!, _empty = null!, _welcome = null!;
 
@@ -197,15 +197,28 @@ public sealed partial class MainWindow
         _settingsPanel.Changed += () => ApplyPrefs();
         _settingsPanel.LanguagePicked += SetLanguage;
         _settingsPanel.PickVault += () => _ = PickFolder();
+        _settingsPanel.AssocToggle += reg => Association(reg);
+        _assocBanner = new FileBanner();
         Editor.SizeChanged += (_, _) => ApplyTextWidth();
-        var root = new Grid { RowDefinitions = new RowDefinitions("Auto,*,Auto"), Background = Skin.Bg };
-        Grid.SetRow(body, 1);
-        Grid.SetRow(_status, 2);
-        Grid.SetRowSpan(_settingsPanel, 3);
-        Grid.SetRowSpan(_palette, 3);
+        var root = new Grid { RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), Background = Skin.Bg };
+        Grid.SetRow(_assocBanner, 1);
+        Grid.SetRow(body, 2);
+        Grid.SetRow(_status, 3);
+        Grid.SetRowSpan(_settingsPanel, 4);
+        Grid.SetRowSpan(_palette, 4);
+
         _historyPanel = new HistoryPanel();
-        Grid.SetRowSpan(_historyPanel, 3);
+        Grid.SetRowSpan(_historyPanel, 4);
         root.Children.Add(_topBar);
+
+        root.Children.Add(_assocBanner);
+
+
+
+
+
+
+
         root.Children.Add(body);
         root.Children.Add(_status);
         root.Children.Add(_settingsPanel);
@@ -300,6 +313,16 @@ public sealed partial class MainWindow
             Child = _welcomeOpen = new TextBlock { Text = Loc.T("welcome.open"), FontSize = 14, FontWeight = FontWeight.Bold, Foreground = Skin.AccentFg },
         };
         open.PointerReleased += (_, _) => _ = PickFolder();
+        var openFile = new Border
+        {
+            Background = Brushes.Transparent, BorderBrush = Skin.Line, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(18, 9), Cursor = Ui.Hand, HorizontalAlignment = HorizontalAlignment.Left,
+            Child = _welcomeOpenFile = new TextBlock { Text = Loc.T("welcome.openfile"), FontSize = 14, Foreground = Skin.Fg },
+        };
+        openFile.PointerEntered += (_, _) => openFile.Background = Skin.Sel;
+        openFile.PointerExited += (_, _) => openFile.Background = Brushes.Transparent;
+        openFile.PointerReleased += (_, _) => _ = PickFile();
+        var openButtons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { open, openFile } };
         _welcomeKeys = new TextBlock { Text = WelcomeKeysHint(), Foreground = Skin.Mute, FontSize = 12 };
         var help = _welcomeHelp = new TextBlock { Text = Loc.T("welcome.help"), Foreground = Skin.Accent, FontSize = 13, Cursor = Ui.Hand };
         help.PointerReleased += (_, _) => OpenHelp();
@@ -318,7 +341,7 @@ public sealed partial class MainWindow
                 {
                     new TextBlock { Text = "Leaflet", FontSize = 44, FontWeight = FontWeight.Black, Foreground = Skin.Heading },
                     _welcomeBlurb,
-                    open,
+                    openButtons,
                     _welcomeKeys,
                     help,
                 },
@@ -334,6 +357,7 @@ public sealed partial class MainWindow
         ((TextBlock)_segRead.Child!).Text = Loc.T("seg.read");
         _helpText.Text = Loc.T("cmd.help");
         _welcomeOpen.Text = Loc.T("welcome.open");
+        _welcomeOpenFile.Text = Loc.T("welcome.openfile");
         _welcomeHelp.Text = Loc.T("welcome.help");
         _welcomeBlurb.Text = Loc.T("welcome.blurb");
         _right.Relocalize();
@@ -344,6 +368,7 @@ public sealed partial class MainWindow
         UpdateNoteInfo(full: true);
         UpdateStatus();
         UpdateBanner();
+        if (_assocBanner.IsVisible) ShowAssocBanner();
         Editor.TextArea.TextView.Redraw();
     }
 
